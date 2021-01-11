@@ -1,0 +1,276 @@
+Midterm HW
+================
+통계 1714615 김승주
+
+\#\#2. timeseries문제에서 Cheongpa2데이터 및 다른 세팅을 동일하게 한 후 체류 인구 예측 모형을 만들되 y를
+연속형 확률변수가 아닌 count type으로 간주한다 따라서 Poisson Distribution으로 모형화될 수 있다.
+
+\#\#\#(b) true theta의 최대가능도 추정량(MLE)을 \(\widehat{\theta}\) 계산하는 알고리즘을
+구현하는 함수 생성하기로 한다. 여기서 이용하는 알고리즘은 반복적 국소 이차근사를 이용한다.
+
+  - glm.poisson(x,y)의 부수적인 변수 지정값으로 이차적 국소 방법의 반복회수에 최대치를 거는 MAXITER와
+    \(\theta\) 의 초기치를 의미하는 theat.old 변수를 추가하였다.
+
+<!-- end list -->
+
+``` r
+glm.poisson = function(X,y,MAXITER,theta.old) {
+  for (t in 1:MAXITER) {
+   
+    hat <- X %*% theta.old
+    prob <- exp(hat)
+    
+    dpi <- ( t(prob-y) %*% X) / length(y) # 1차
+    
+    A = as.vector( prob )
+    d2pi <- t(X) %*% diag(A) %*% X / length(y) #2차
+    
+    #-------------------------------------
+    
+    d2pi2 <- solve(d2pi)
+    
+    theta.new <- theta.old - c( d2pi2 %*% t(dpi) )
+
+    # diff는 theta.new와 theta.old간 유클리드 거리로 정의하였음
+    diff = sqrt(sum((theta.new - theta.old)^2))
+    # theta가 충분히 수렴한 듯하면 
+    # 가장 최신의 theta.new를 theta의 추정값(theta.hat)으로 제시 후
+    # 반복문 빠져나가기
+    if (diff < (10^-8)) { 
+      cat(sprintf("Fisher scoring algorithm converged with %d iterations\n", t))
+      theta.hat = theta.new
+      break
+    }
+    
+    theta.old <- theta.new
+    
+    # 수렴 실패하였을 경우 메시지 출력
+    if (t == MAXITER) cat("Did not converge\n")
+  }
+  print(theta.hat)
+}
+```
+
+  - 알고리즘이 잘 작동함을 확인
+
+<!-- end list -->
+
+``` r
+# 가상의 true data set 생성
+set.seed(15)
+n = 1000
+X1 = rnorm(n)
+X2 = rnorm(n)
+
+theta.true = c(2, -1,3)
+x_theta = theta.true[1] + theta.true[2] * X1 + theta.true[3] * X2
+
+y = rpois(n=n, lambda = exp(x_theta))
+
+X = cbind(1, X1, X2)
+
+# 위의 생성한 함수에 적용하고 glm함수에 적용한 계수 추정값과 비교
+MAX= 1000
+theta.old = c(4,0,1)
+
+fit <- glm(y~ X1 + X2, family=poisson)                                   
+summary(fit)
+```
+
+    ## 
+    ## Call:
+    ## glm(formula = y ~ X1 + X2, family = poisson)
+    ## 
+    ## Deviance Residuals: 
+    ##     Min       1Q   Median       3Q      Max  
+    ## -3.5911  -0.7444  -0.2355   0.5562   3.2672  
+    ## 
+    ## Coefficients:
+    ##              Estimate Std. Error z value Pr(>|z|)    
+    ## (Intercept)  1.996460   0.005496   363.2   <2e-16 ***
+    ## X1          -0.999657   0.001495  -668.5   <2e-16 ***
+    ## X2           3.002032   0.002192  1369.3   <2e-16 ***
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## (Dispersion parameter for poisson family taken to be 1)
+    ## 
+    ##     Null deviance: 4577844.57  on 999  degrees of freedom
+    ## Residual deviance:     942.25  on 997  degrees of freedom
+    ## AIC: 4754.1
+    ## 
+    ## Number of Fisher Scoring iterations: 4
+
+``` r
+glm.poisson(X= cbind(1, X1, X2), y=y, MAXITER = 1000, theta.old = c(4,0,1))
+```
+
+    ## Fisher scoring algorithm converged with 37 iterations
+    ## [1]  1.9964603 -0.9996571  3.0020324
+
+위의 알고리즘을 구현하는 함수에 적용하여 얻은 계수 추정값(\(\widehat{beta}\) = (1.9964603
+-0.9996571 3.0020324))은 glm(…,family=poisson)을 이용한 계수 추정치와 같음을 알 수 있다.
+
+\#\#\#(c)
+
+``` r
+load("Cheongpa2.Rdata")
+head(Cheongpa2)
+```
+
+    ##         Date Today  Lag1  Lag2  Lag3  Lag4  Lag5  Lag6  Lag7
+    ## 1 2018-12-08 19785 26437 27519 27105 26583 26618 22751 24606
+    ## 2 2018-12-09 20630 19785 26437 27519 27105 26583 26618 22751
+    ## 3 2018-12-10 26257 20630 19785 26437 27519 27105 26583 26618
+    ## 4 2018-12-11 25284 26257 20630 19785 26437 27519 27105 26583
+    ## 5 2018-12-12 25862 25284 26257 20630 19785 26437 27519 27105
+    ## 6 2018-12-13 25054 25862 25284 26257 20630 19785 26437 27519
+
+``` r
+data_re = Cheongpa2
+for ( i in 1:8){
+   data_re[c(254+(i-1),260+(i-1),261+(i-1)),i+1] = c(18093.50, 18358.67, 19212.33)
+}
+```
+
+데이터의 이상치를 replace하는 작업까지 동일하게 진행한다.
+
+``` r
+# 데이터셋 나누기 (tr : val : te = 6:2:2)
+x = model.matrix(Today~., data=data_re)[,-c(1,2)]
+y = as.integer(data_re$Today)
+
+tr = 0.6
+va = 0.2
+n = nrow(Cheongpa2)
+
+x.train = x[1 : floor(n*tr),]
+y.train = y[1 : floor(n*tr)]
+x.val = x[(floor(n*tr) + 1 ) : floor(n*(tr + va)), ]
+y.val = y[(floor(n*tr) + 1 ) : floor(n*(tr + va)) ]
+x.test = x[(floor(n*(tr + va)) + 1 ): n,]
+y.test = y[(floor(n*(tr + va)) + 1 ) : n]
+```
+
+  - 1과 동일한 훈련세트에 모델을 적합한다.
+  - 우선 원래 glm 함수에 적용해보자.
+
+<!-- end list -->
+
+``` r
+obj.poi = glm(y.train ~ x.train, family = poisson)
+summary(obj.poi)
+```
+
+    ## 
+    ## Call:
+    ## glm(formula = y.train ~ x.train, family = poisson)
+    ## 
+    ## Deviance Residuals: 
+    ##     Min       1Q   Median       3Q      Max  
+    ## -52.684   -6.385    0.152    6.012   49.810  
+    ## 
+    ## Coefficients:
+    ##               Estimate Std. Error  z value Pr(>|z|)    
+    ## (Intercept)  9.257e+00  2.515e-03 3681.121  < 2e-16 ***
+    ## x.trainLag1  2.256e-05  1.555e-07  145.046  < 2e-16 ***
+    ## x.trainLag2 -5.131e-06  1.797e-07  -28.555  < 2e-16 ***
+    ## x.trainLag3  2.696e-06  1.823e-07   14.789  < 2e-16 ***
+    ## x.trainLag4  6.441e-07  1.839e-07    3.503 0.000461 ***
+    ## x.trainLag5 -7.478e-07  1.846e-07   -4.052 5.08e-05 ***
+    ## x.trainLag6  4.779e-06  1.830e-07   26.117  < 2e-16 ***
+    ## x.trainLag7  1.000e-05  1.574e-07   63.542  < 2e-16 ***
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## (Dispersion parameter for poisson family taken to be 1)
+    ## 
+    ##     Null deviance: 214815  on 393  degrees of freedom
+    ## Residual deviance:  56033  on 386  degrees of freedom
+    ## AIC: 60783
+    ## 
+    ## Number of Fisher Scoring iterations: 3
+
+``` r
+yhat.glm = exp(cbind(1,x.val)%*%coef(obj.poi))
+val.err.rmse = sqrt(mean((y.val-yhat.glm)^2 ))
+val.err.mae = mean(abs(y.val-yhat.glm))
+val.err.mape = mean(abs((y.val-yhat.glm)/y.val))*100
+
+val.err = c("rmse"=val.err.rmse ,"mae"=val.err.mae, "mape"=val.err.mape)
+```
+
+  - 다음으로 알고리즘을 구현한 함수를 적용해본다.
+
+<!-- end list -->
+
+``` r
+thetahat= glm.poisson(X=cbind(1,x.train), y=y.train, MAXITER = 1000, theta.old = c(8,rep(0, ncol(x))))
+```
+
+    ## Fisher scoring algorithm converged with 14 iterations
+    ## [1]  9.256824e+00  2.255674e-05 -5.130525e-06  2.696217e-06  6.440883e-07
+    ## [6] -7.477838e-07  4.778971e-06  1.000044e-05
+
+``` r
+yhat.func.glm = exp(cbind(1,x.val)%*%thetahat)
+val.err.func.rmse = sqrt(mean((y.val-yhat.func.glm)^2 ))
+val.err.func.mae = mean(abs(y.val-yhat.func.glm))
+val.err.func.mape = mean(abs((y.val-yhat.func.glm)/y.val))*100
+
+val.err.func = c("rmse"=val.err.func.rmse ,"mae"=val.err.func.mae, "mape"=val.err.func.mape)
+```
+
+``` r
+com = data.frame(yhat.glm,yhat.func.glm)
+head(com)
+```
+
+    ##     yhat.glm yhat.func.glm
+    ## 395 30762.59      30762.59
+    ## 396 29780.35      29780.35
+    ## 397 28747.67      28747.67
+    ## 398 28817.33      28817.33
+    ## 399 30842.78      30842.78
+    ## 400 31130.08      31130.08
+
+``` r
+list("validation error with glm"=val.err,"validation error with glm.poisson"=val.err.func)
+```
+
+    ## $`validation error with glm`
+    ##        rmse         mae        mape 
+    ## 1221.748878  912.091238    2.937475 
+    ## 
+    ## $`validation error with glm.poisson`
+    ##        rmse         mae        mape 
+    ## 1221.748878  912.091238    2.937475
+
+#### 두가지 방법을 비교해 보았을때 동일함을 알 수 있다.
+
+\*\* 1번 문제의 yhat.ridge.opt를 시각화를 위해 가져왔다.\*\*
+
+``` r
+# 편의성을 위해 각 번호마다 RMD파일을 나누어 놓는 것으로 인해 knit를 위해 따로 가져오게 되었습니다.
+yhat.ridge.opt =c(30733.75, 29867.26, 29004.04 ,28932.60, 30944.65, 31111.76 ,30391.88 ,30615.90, 29602.78, 29042.28, 28889.62 ,30484.35 ,30444.57, 30897.16 ,29747.58 ,26709.43, 27057.85, 26969.87, 28447.53 ,31053.36 ,29603.32 ,28911.68 ,29685.83, 27587.37 ,28418.78, 31710.20 ,31025.48 ,31260.74, 31335.61 ,30634.57, 29467.78, 29576.65, 31791.97 ,31025.86 ,30781.59 ,31537.75 ,30508.30, 30132.28, 29830.40, 31457.69 ,30530.49, 31458.92, 31057.34 ,31137.68, 29129.40, 29368.43 ,31604.31, 30278.45, 31507.96, 31869.07 ,29795.63 ,30712.98, 30211.33 ,32311.80 ,31825.21, 31961.94, 31777.47, 31674.47, 30871.23, 31168.13 ,32757.33 ,31360.16 ,32661.72, 32298.72, 31604.63, 30321.11 ,30756.37, 32667.07, 32117.63, 32688.72, 31392.49 ,31238.91, 30059.40 ,30848.46 ,31747.49 ,31261.63 ,31369.86, 30784.56 ,30340.68 ,29810.91, 29585.82 ,31755.11, 31226.98, 31508.49, 31344.17, 30992.72 ,30069.74 ,30593.98, 32670.43 ,32176.11 ,32256.34 ,32199.98 ,31727.08 ,30642.70 ,31370.19, 32662.32 ,32446.71, 31975.25, 32521.87, 31142.78 ,30981.31, 30501.76 ,32894.91, 32016.94, 32273.41 ,31973.97 ,31782.47, 30513.80 ,31201.18, 33102.85, 32323.71 ,32720.99 ,30598.82 ,30484.22 ,29925.73 ,31209.30, 32985.46, 31275.55, 32856.03 ,31311.74 ,31591.04 ,30289.00 ,31578.94, 33301.00, 33239.29, 33226.80 ,32464.49, 31088.49, 31343.02, 31403.97 ,33229.62, 33036.22 )
+```
+
+``` r
+#검증세트에서의 시각화
+
+plot(x=Cheongpa2$Date[(floor(n*tr) + 1 ) : floor(n*(tr + va))], y=y.val, xlab = "Data in Validation set")
+points(x=Cheongpa2$Date[(floor(n*tr) + 1 ) : floor(n*(tr + va))], y=yhat.glm, pch="*", col="blue")
+points(x=Cheongpa2$Date[(floor(n*tr) + 1 ) : floor(n*(tr + va))], y=yhat.func.glm, pch="o", col="red")
+points(x=Cheongpa2$Date[(floor(n*tr) + 1 ) : floor(n*(tr + va))], y=yhat.ridge.opt, pch="*", col="darkgreen")
+
+legend("bottomright", c( "y", "yhat.glm", "yhat.func.glm", "yhat.ridge") , col=c("black","blue","red", "darkgreen"), pch = c("o","*","o","*"))
+```
+
+![](Count_dist_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+
+\`\`\` \*\* 알고리즘을 구현한 함수를 적용한 방법과 glm 함수를 이용한 방법의 추정이 동일함을 y와
+\(\widehat{y}\)그래프에서도 알 수 있으며 잘 추정한 모형임을 알 수 있다. \*\* \#\#\#\# 1번의 최적
+모델로 선택된 능형회귀 모형의 오류지표들과 비교해 보았을때 여기서 Y의 조건부 분포를 포아송 분포로 하여 (X,Y)가
+로그선형 모형을 따른다는 가정으로 구한 세가지 오류측도들은 앞의 오류측도들보다 더 작게 나온 것을 알 수 있었다. 따라서
+1번의 최적 모형보다 유의한 결과임을 말할 수 있다. \#\#\#\# 또한 위의 y와 \(\widehat{y}\)
+그래프에서도 ridge regression 모형보다 로그선형모형이 조금 더 적합이 잘 된 것을 확인할 수 있다.
