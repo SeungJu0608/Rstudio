@@ -1,0 +1,395 @@
+---
+title: "이진트리배깅 학습기와 그래디언트 부스팅 구현하기"
+author: "김승주"
+output: html_document
+---
+
+### 1. 이진분류를 위한 트리 배깅 학습기 하드코딩
+$$ bagging.class(X , y, newdata, B, d) $$
+
+** Input of function  **  
+   $\bullet$ x : feature variable. numeric matrix ( n by p ).  
+   $\bullet$ y : response variable. numeric vector ( size n ). elements are {0 or 1}  
+   $\bullet$ newdata : feature variable of data to predict. numeric matrix ( m by p ).  
+   $\bullet$ B : an integer. number of base learner  
+   $\bullet$ d : an integer. size of tree for base learner  
+
+#### (a) 함수 구현하기
+```{r}
+bagging.class = function(X, y, newdata, B, d) {
+  
+  require(tree)
+  
+  new = data.frame(newdata)
+  y = factor(y)
+  df = data.frame(y, X)
+  m = nrow(df)
+  yhat.data = as.data.frame(matrix(NA, nrow=nrow(new), ncol = B))
+  
+  for ( b in 1:B) {
+    # 부트스트랩 데이터셋 생성
+    set.seed(b*50)
+    ind.b = sample(1:m , size = m, replace = T)
+    df.b = df[ind.b,]
+    
+    # 각 기본학습기 훈련
+    tree.b.max = tree(y ~ . , data = df.b) # 하나의 큰 tree
+    tree.b = prune.tree(tree.b.max, best = d) # d개의 노드(나무의 크기)를 적용한 기본학습기
+    
+    # 각 기본학습기를 이용한 예측 
+    yhat.data[,b] = as.numeric(predict(tree.b, newdata = new, type = "class"))-1
+  }
+  
+  # 투표
+  yhat.pre = apply(yhat.data, 1, function(x) ifelse(mean(as.numeric(x)) >= 0.5, 1, 0))
+  
+  return(yhat.pre)
+}
+
+```
+
+함수 세부 구성에 대한 내용은 다음과 같다.
+
+1. 데이터 정제 단계   
+  기본학습기로 트리 모델을 이용하기 위해 데이터 정제가 우선 필요하다.  
+  가장 먼저 tree패키지를 먼저 불러온다.  
+  예측 변수 y를 factor 형으로 변환해주며 훈련 데이터셋과 학습 데이터셋은 dataframe으로의 전환을 해준다.  
+  여기서 다음 단계인 for문에서 생성될 각 기본학습기를 이용하여 학습 데이터셋을 예측한 변수를 저장할 공간을 만들어준다.  
+
+2. for문 : B개의 기본학습기 훈련 단계  
+  2-1. 가장 먼저 부트스트랩 데이터셋을 생성한다.  
+  2-2. 앞에서 생성된 부트스트랩 데이터셋을 이용하여 기본 학습기를 훈련시킨다. 이때 트리모델을 이용한다. 먼저 tree함수를 이용해 가장 큰 tree를 학습하고 prune.tree를 이용하여 나무의 크기 (d개의 분기)를 적용한 기본 학습기를 생성한다.  
+  2-3. 나무의 크기를 지정한 기본 학습기를 이용하여 newdata를 적합시켜 예측값을 도출한다. 이때 이진분류에 대한 tree 기본학습기를 이용한 것으로 예측변수에 대한 class를 도출하도록하며 이를 numeric으로 변환시켜준다.  
+  2-4. 앞의 과정을 B번 반복하여 각 예측값을 B개 도출한다.  
+
+3. 최종 함숫값 도출
+ 앞의 2번 과정에서 생성된 B개의 예측값들에 대해 투표를 진행한다. 각 B개 예측값에 대한 평균을 계산하여 0.5보다 크거나 같으면 1을 그렇지 않으면 0을 부여하여 최종 예측값으로 한다. 이를 함숫값으로 return 해준다.  
+ 
+#### (b) 함수 시뮬레이션과 외부 라이브러리 함수와의 비교
+
+###### 이진분류 시뮬레이션 데이터셋 생성
+```{r}
+set.seed(1)
+
+# define the inverse logit function
+expit = function(t) return(exp(t) / (1 + exp(t)))
+# sample size is n=1000, the number of variables is p=20
+n = 100
+x = matrix(nrow = n, ncol = 10)
+for (i in 1:10) {
+  set.seed(i)
+  x[,i] = rnorm(n)
+}
+
+# 상수항(1)을 포함한 자료행렬
+Xmat = cbind(1, x)
+
+# the true coefficients
+set.seed(1)
+theta.true = sample(-3:3, size=11, replace= T)
+
+#linear model
+x_theta = 0
+for (j in 1:length(theta.true)) {
+  x_theta = x_theta + theta.true[j]*Xmat[,j]
+}
+# Y|X follows the Bernoulli distribution 
+#    with the success probability as expit(beta0 + beta1 * X1 + beta2 * X2 + ... + beta10*X10)
+y = rbinom(n=n, size=1, prob=expit(x_theta)) 
+
+```
+
+이진분류를 위한 임의의 데이터셋을 위와 같이 생성하였다.
+여기서 10개의 feature변수 X를 이용하여 이진데이터 y를 임의의 계수값들을 적용해(true theta) logistic regression을 이용하여 생성하였다.  
+
+```{r}
+X.tr = x[1:70,]
+y.tr = y[1:70]
+newdt = data.frame(y,x)[71:n,]
+newmat = newdt[,-1]
+
+B = 50
+d = 3
+```
+
+훈련용 데이터셋과 학습용 데이터셋을 7:3 비율로 나누었고 임의의 B값과 d값을 생성하였다.  
+  
+###### 하드코딩 함수에 적용하기
+```{r}
+fin = bagging.class(X = X.tr, y = y.tr, newdata = newmat, B = B, d= d)
+```
+
+(a)번에서 구현한 이진분류 트리배깅 함수에 적용하여 fin이라는 이름으로 저장하였다.
+
+###### 외부 패키지 이용하기
+```{r}
+# randomForest 패키지 이용
+library(randomForest)
+
+df.tr = data.frame(y = factor(y.tr), X.tr)
+df.te = data.frame(newmat)
+p = ncol(X.tr)
+
+set.seed(2)
+obj.tree = randomForest(y ~ . , data = df.tr, mtry = p, ntree = B, maxnodes = d)
+final = predict(obj.tree, newdata = df.te, type = "class")
+```
+  
+**randomForest 패키지**를 이용하여 시뮬레이션 데이터에 적합하였다.  
+여기서 하드코딩으로 구현한 함수의 초모수 옵션은 최대한 동일하게 맞추었다. (기본학습기의 개수(ntree = B), 기본학습기 나무의 크기(maxnodes = d+1), 기본학습기에 이용되는 feature변수의 개수(mtry = p))  
+  
+###### 비교하기  
+```{r}
+true.y = newdt[,1]
+
+sum(fin != final)
+
+# 각 함수를 이용한 예측값 오분류율 
+table(true.y, final)
+cat(sprintf( "Error rate with using randomForest package %f", sum(true.y != final)/sum(length(true.y)))) 
+
+print( table(true.y, fin))
+cat(sprintf("Error rate with using function %f", sum(true.y != fin)/sum(length(true.y))))
+```
+
+각 함수를 이용하여 학습데이터에 대한 예측을 진행 하였을때 오분류율을 위와 같이 도출하였다.  
+오분류율은 패키지를 이용하였을때 0.2, 하드코딩한 함수를 이용하였을때 0.233으로 유사함을 알 수 있었다.
+
+```{r}
+print(data.frame(true_y = true.y, Hard_Coding = fin, Package = final))
+```
+
+위는 조금 더 자세히 예측 결과를 비교해 보기 위해 예측된 값들과 true 값을 데이터 프레임으로 나타내었다.  
+외부패키지를 이용한 예측결과와 하드코딩한 함수를 이용한 예측결과가 비슷함을 알 수 있다. 여기서 약간의 차이가 생긴 부분은 radomness로 인해 생긴 차이라고 생각할 수 있다.  
+
+
+- 시뮬레이션 데이터셋의 크기를 증가시킨 경우도 확인하여 보자.  
+- 여기서도 동일하게 training set과 test set을 7:3비율로 나눈다.
+- 트리배깅은 overfitting을 걱정하지 않아도 된다는 장점이 있으므로 초모수 B와 d를 조금 더 크게 해보기로 한다. 여기서 d는 분산을 안정화시키는 배깅의 목적에 부합하게 하기위해 기본학습기 트리에서 가지치지 않은  best size와 approximate한 값을 이용한다.
+```{r}
+n = 1000
+xx = matrix(nrow = n, ncol = 20)
+for (i in 1:20) {
+  set.seed(i)
+  xx[,i] = rnorm(n)
+}
+
+# 상수항(1)을 포함한 자료행렬
+XXmat = cbind(1, xx)
+
+# the true coefficients
+set.seed(1)
+theta.true = sample(-5:5, size=21, replace= T)
+
+#linear model
+xx_theta = 0
+for (j in 1:length(theta.true)) {
+  xx_theta = xx_theta + theta.true[j]*XXmat[,j]
+}
+# Y|X follows the Bernoulli distribution 
+#    with the success probability as expit(beta0 + beta1 * X1 + beta2 * X2 + ... + beta20*X20)
+yy = rbinom(n=n, size=1, prob=expit(xx_theta)) 
+
+XX.tr = xx[1:n*0.7,]
+yy.tr = yy[1:n*0.7]
+newdt_2 = data.frame(yy,xx)[(n*0.7+1):n,]
+newmat_2 = newdt_2[,-1]
+
+B_2 = 500
+d_2 = 25
+```
+
+- 하드코딩한 함수와 패키지 함수에 적용하기
+```{r}
+fin_2 = bagging.class(X = XX.tr, y = yy.tr, newdata = newmat_2, B = B_2, d= d_2)
+
+df.tr_2 = data.frame(y = factor(yy.tr), XX.tr)
+p = ncol(XX.tr)
+
+set.seed(2)
+obj.tree_2 = randomForest(y ~ . , data = df.tr_2, mtry = p, ntree = B_2, maxnodes = d_2)
+final_2 = predict(obj.tree_2, newdata = newmat_2, type = "class")
+```
+
+- 오분류율 확인하기  
+다음과 같은 결과를 통해 두 함수의 예측결과가 유사함을 알 수 있다. test error rate가 비슷하며 예측결과들 중 다른것의 개수가 매우 적은 것을 볼 수 있으므로 두 함수의 예측결과가 유사함을 알 수 있다.
+```{r}
+true.yy = newdt_2[,1]
+
+# 각 함수를 이용한 예측값 오분류율 
+table(true.yy, final_2)
+cat(sprintf( "Error rate with using randomForest package %f", sum(true.yy != final_2)/sum(length(true.yy))))   
+
+print( table(true.yy, fin_2))
+cat(sprintf("Error rate with using function %f", sum(true.yy != fin_2)/sum(length(true.yy))))
+
+sum(fin_2 != final_2)
+```
+
+### 2. 그래디언트 부스팅 구현하기  
+
+$$ gbm.class(X , y, newdata, B, d, eps) $$  
+ ** Input of function  **  
+   $\bullet$ x : feature variable. numeric matrix ( n by p ).  
+   $\bullet$ y : response variable. numeric vector ( size n ). elements are {0 or 1}  
+   $\bullet$  newdata : feature variable of data to predict. numeric matrix ( m by p ).  
+   $\bullet$  B : an integer. number of base learner  
+   $\bullet$  d : an integer. size of tree for base learner  
+   $\bullet$  eps : a numeric scalar. shrinkage factor of base learner  
+   
+   
+   
+#### (a) 함수 구현하기
+
+```{r}
+gbm.class = function(X, y, newdata, B, d, eps) {
+  
+  require(tree)
+  
+  # 데이터 정제
+  new = data.frame(newdata)
+  df = data.frame(y, X)
+  
+  # 부트스트랩 데이터셋 생성과 기본학습기의 학습
+  # -(손실함수 미분) = y - epit
+  expit = function(t) return(exp(t)/(1+exp(t)))
+  
+  # 초기값
+  Ghat = rep(0, nrow(df))
+  y.new.pre = rep(0, nrow(newdata))
+  
+  for (b in 1:B) {
+
+    # 유사 잔차(pseudo_resident) 갱신
+    r = df$y - expit(Ghat)
+    df.b = data.frame(r, X)
+    
+    # r을 반응 변수로 하고 X를 설명변수로 하는 회귀나무 적합
+    tree.b = tree(r ~ ., data = df.b) 
+    tree.g.b = prune.tree(tree.b, best = d)
+    
+    # 잔차 적합값 도출
+    rhat.b = predict(tree.g.b, newdata = df.b)
+    r.pre.te = predict(tree.g.b, newdata = new)
+    
+    # newdata에 대한 예측값 계산
+    y.new.pre = y.new.pre + eps*r.pre.te
+      
+    # b번째 부스팅 학습기 생성
+    Ghat = Ghat + eps*rhat.b
+  }
+  # 반응변수 도출
+  predicted.y = ifelse(y.new.pre >= 0.5, 1, 0)
+  
+  # 최종 함수값 도출
+  return(predicted.y)
+}
+```
+
+여기에서도 앞의 1번문제에서 함수를 구현한 것과 비슷한 순서로 함수를 구현하였다.
+우선 분류문제에서의 손실함수를 다음과 같이 선택하였다.
+
+$$ L(y,\lambda) = -y\lambda + log(1+exp(\lambda)) $$
+
+ 1. 데이터 정제
+    - 기본학습기의 tree 패키지를 이용하기에 편하도록 미리 input데이터의 형태를 data.frame으로 맞추어준다.
+    - 여기에서는 분류문제지만 기본학습기들을 회귀나무로 적합시켜주기 때문에 input data y를 factor 형으로 변경해줄 필요는 없다.
+    - 유사 잔차 갱신에 이용되는 $-{\partial L(y,\lambda)\over\partial \lambda}$ = $y$ - $exp(\lambda)\over1+exp(\lambda)$ 에서 $exp(\lambda)\over1+exp(\lambda)$ 부분을 따로 함수로 지정해주자.(expit(t))
+    - Ghat의 초기값을 지정해준다. 모든 원소가 0이고 input data X와 y를 dataframe으로 지정해준 df의 행개수와 동일한 벡터로 초기값을 지정한다.
+    - 함수 안에서 각 기본학습기를 이용해 newdata의 예측된 잔차들의 합을 계산해야하므로 newdata의 초기값 또한 Ghat의 초기값과 동일하게 지정한다. 다만 newdata의 행길이와 동일하게 설정해주어야한다.
+    
+2. for 문 : 기본학습기의 학습과 예측  
+    2-1. 가장 먼저 유사잔차를 갱신한다.  
+    2-2. 그다음 갱신된 유사잔차를 반응변수로 하고 input data X를 설명변수로 하는 회귀나무를 적합한다. 
+        여기서 tree 패키지의 tree함수를 이용하여 Max size인 회귀나무를 적합(: tree.b)하고 input data d를 만족하는 tree를  
+        적합하기 위해 도출한 Max size의 tree를 prune.tree함수를 이용한다.  
+    2-3. 앞에서 적합시킨 모델을 이용하여 r의 적합값을 계산한다.  
+        여기서 newdata를 이용하여 잔차값 r을 예측한다.  
+    2-4. newdata의 예측 잔차값들에 shrinkage factor을 곱하고 누적합을 취한다.  
+    2-5. Ghat을 갱신해주고 이를 b번째 부스팅 학습기로 한다.  
+
+3. 최종 함수값으로 각 B번의 기본학습기를 이용하여 얻은 newdata의 잔차들의 누적합을 0과 1로 도출한다. 이때 cutoff는 0.5로 한다.  
+
+#### (b) 함수 시뮬레이션과 외부 라이브러리 함수와의 비교
+
+###### 이진분류 시뮬레이션 데이터셋 생성 
+
+여기서도 동일하게 training set과 test set을 7:3비율로 나눈다.
+편의를 위해 앞의 1-(b)번에서 이용한 데이터셋과 유사하게 세팅하였다.
+
+그래디언트 부스팅에서도 마찬가지로 예측결과의 분산을 작게 만드는 것을 목적으로 하기 때문에 input data d를 기본학습기 tree의 max size와 approximate한 값으로 지정하였다.
+```{r}
+n = 1000
+xxx = matrix(nrow = n, ncol = 20)
+for (i in 1:20) {
+  set.seed(i)
+  xxx[,i] = rnorm(n)
+}
+# define the inverse logit function
+expit = function(t) return(exp(t) / (1 + exp(t)))
+
+# 상수항(1)을 포함한 자료행렬
+XXXmat = cbind(1, xxx)
+
+# the true coefficients
+set.seed(3)
+theta.true = sample(-5:5, size=21, replace= T)
+
+#linear model
+xxx_theta = 0
+for (j in 1:length(theta.true)) {
+  xxx_theta = xxx_theta + theta.true[j]*XXXmat[,j]
+}
+# Y|X follows the Bernoulli distribution 
+#    with the success probability as expit(beta0 + beta1 * X1 + beta2 * X2 + ... + beta20*X20)
+yyy = rbinom(n=n, size=1, prob=expit(xxx_theta)) 
+
+XXX.tr = xxx[1:n*0.7,]
+yyy.tr = yyy[1:n*0.7]
+newdt_3 = data.frame(yyy,xxx)[(n*0.7+1):n,]
+newmat_3 = newdt_3[,-1]
+
+B_3 = 300
+d_3 = 20
+eps = 0.05 
+```
+
+###### 구현한 함수에 적용하기
+```{r}
+fin.gbm = gbm.class(X = XXX.tr, y = yyy.tr, newdata = newmat_3, B = B_3, d= d_3, eps = eps)
+```
+
+###### gbm 패키지를 이용하여 적용하기
+```{r}
+# gbm 패키지 이용
+library(gbm)
+
+df.tr_3 = data.frame(yyy.tr , XXX.tr)
+
+
+set.seed(50)
+obj.gb = gbm(yyy.tr ~ ., data=df.tr_3,
+             distribution = "bernoulli", 
+             n.trees = B_3, 
+             shrinkage = eps, 
+             interaction.depth = d_3
+)
+
+final.gbm = ifelse(predict(obj.gb, newdata = newmat_3, type = "response") >= 0.5 , 1, 0)
+```
+
+###### 두 함수 비교하기
+```{r}
+## 비교
+true.yyy = newdt_3[,1]
+
+# 각 함수를 이용한 예측값 오분류율 
+table(true.yyy, final.gbm)
+cat(sprintf( "Error rate with using randomForest package %f", sum(true.yyy != final.gbm)/sum(length(true.yyy))))   
+
+print( table(true.yyy, fin.gbm))
+cat(sprintf("Error rate with using function %f", sum(true.yyy != fin.gbm)/sum(length(true.yyy))))
+
+sum(fin.gbm != final.gbm)
+```
+두 함수를 이용한 test error 값이 매우 비슷하지는 않다. 그 이유는 gbm에서는 부트스트랩을 기반으로 하기 때문이라고 생각이 된다. 또한 자료의 randomness와 함께 약간의 차이가 발생한것으로 생각할 수 있을 것 같다.
