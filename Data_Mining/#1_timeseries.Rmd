@@ -1,8 +1,3 @@
----
-title: "Midterm HW"
-author: "통계 1714615 김승주"
-output: rmarkdown::github_document
----
 
 ##1. 
 Cheongpa2 자료를 활용하여 최근 7일간 체류인구로부터 내일의 체류인구를 예측한다.  
