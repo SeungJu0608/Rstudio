@@ -1,6 +1,3 @@
-Midterm HW
-================
-통계 1714615 김승주
 
 \#\#2. timeseries문제에서 Cheongpa2데이터 및 다른 세팅을 동일하게 한 후 체류 인구 예측 모형을 만들되 y를
 연속형 확률변수가 아닌 count type으로 간주한다 따라서 Poisson Distribution으로 모형화될 수 있다.
